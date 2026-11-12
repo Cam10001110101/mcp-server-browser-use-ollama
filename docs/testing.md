@@ -9,16 +9,17 @@ tests/
 ├── __init__.py                  # Makes tests a package
 ├── conftest.py                  # Shared fixtures and configuration
 ├── test_server_mcp.py          # Pure MCP SDK implementation tests (22 tests)
-├── test_server.py              # Legacy FastMCP tests (kept for reference)
-├── test_integration.py         # End-to-end integration tests
+├── test_server.py              # MCP tool implementation tests
+├── test_integration.py         # Client and server integration tests
+├── test_security.py            # Injection, sandbox, lifecycle and stdio regressions
 └── run_tests.py                # Test runner script
 ```
 
 ## Current Test Status
 
-- **test_server_mcp.py**: Tests for pure MCP implementation - Primary test suite
-- **test_integration.py**: Integration tests with browser automation
-- **test_server.py**: Legacy tests (may fail due to FastMCP removal)
+- **test_server_mcp.py**: Tests for the MCP implementation
+- **test_integration.py**: Client and server integration tests
+- **test_server.py**: Current tool implementation tests
 
 ## Running Tests
 
@@ -26,13 +27,13 @@ tests/
 
 ```bash
 # Install development dependencies
-uv pip install -e ".[dev]"
+uv sync --locked --extra dev
 
 # Run pure MCP tests (recommended)
 pytest tests/test_server_mcp.py -v
 
 # Run all tests
-pytest
+uv run --locked pytest -m "not e2e"
 
 # Run specific test file
 pytest tests/test_server_mcp.py
@@ -101,7 +102,7 @@ pytest -m performance
 ### Basic Test Structure
 
 ```python
-import pytest
+import uv run --locked pytest -m "not e2e"
 from unittest.mock import Mock, patch
 
 class TestMyFeature:
@@ -163,7 +164,7 @@ To run tests with coverage:
 # Run with coverage report
 python tests/run_tests.py coverage
 
-# Or directly with pytest
+# Or directly with uv run --locked pytest -m "not e2e"
 pytest --cov=src --cov-report=html --cov-report=term-missing
 
 # View HTML coverage report
@@ -173,7 +174,7 @@ open htmlcov/index.html
 ## Continuous Integration
 
 Tests are automatically run on GitHub Actions for:
-- Multiple Python versions (3.8 - 3.12)
+- Multiple Python versions (3.11 - 3.14)
 - Multiple operating systems (Ubuntu, macOS, Windows)
 - Pull requests and pushes to main branch
 
@@ -225,3 +226,24 @@ def test_future_feature():
 def test_unix_only():
     pass
 ```
+## Security verification
+
+The suite includes real MCP stdio initialization and error handling, deterministic
+concurrent-launch admission tests, startup failure/cancellation tests, AnyIO
+cancellation cleanup, and screenshot storage checks.
+
+For the actual browser injection regression, install Chromium and explicitly enable
+the E2E test. It serves only a local disposable page; no Ollama service or remote
+website is needed. The test requires a functioning Chromium sandbox.
+
+```bash
+uv run --locked playwright install chromium
+RUN_BROWSER_TESTS=1 uv run --locked pytest -m e2e
+```
+
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select a system Chromium for that test only.
+The application always uses Playwright's installed Chromium. CI installs the
+version paired with the locked Playwright release and does not suppress failures.
+
+See [dependency audit commands](security-remediation.md) for checks covering all
+platforms in the lockfile, including build and development packages.

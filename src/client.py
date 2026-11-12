@@ -58,7 +58,7 @@ class MCPClient:
         if not (is_python or is_js):
             raise ValueError("Server script must be a .py or .js file")
             
-        command = "python" if is_python else "node"
+        command = sys.executable if is_python else "node"
         server_params = StdioServerParameters(
             command=command,
             args=[server_script_path],
@@ -72,8 +72,8 @@ class MCPClient:
         logger.debug("Creating client session")
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
         
-        logger.debug("Initializing session")
-        await self.session.initialize()
+        logger.debug("Discovering server (MCP 2026-07-28)")
+        await self.session.discover()
         
         # List available tools
         logger.debug("Listing tools")
@@ -304,5 +304,9 @@ async def main():
     finally:
         await client.cleanup()
 
-if __name__ == "__main__":
+def cli():
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()

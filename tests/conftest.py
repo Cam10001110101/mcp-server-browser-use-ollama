@@ -13,12 +13,15 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def isolated_browser_sessions(monkeypatch):
+    import server
+
+    monkeypatch.setattr(server, "active_sessions", {})
+    monkeypatch.setattr(server, "pending_launches", 0)
+    monkeypatch.setattr(server, "session_counter", 0)
+    yield
+    await server.cleanup_all_sessions()
 
 
 @pytest.fixture

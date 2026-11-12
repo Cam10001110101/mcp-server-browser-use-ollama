@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -10,7 +10,7 @@ name = "mcp-server-browser-use-ollama"
 version = "0.1.0"
 description = "Browser automation and control system built on the Model Context Protocol (MCP)"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"},
@@ -21,17 +21,20 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "mcp>=1.0.0",
-    "playwright>=1.41.0",
-    "langchain-ollama>=0.3.0",
-    "langchain-core>=0.3.0",
+    "mcp>=2.3.0,<3",
+    "playwright>=1.65.1,<2",
+    "langchain-ollama>=1.1.0,<2",
+    "langchain-core>=1.8.0,<2",
+    "anyio>=4.16.0,<5",
+    # Security floors also apply to installations that do not use uv.lock.
+    "certifi>=2026.10.19",
+    "opentelemetry-api>=1.45.1,<2",
 ]
 
 [project.urls]
@@ -40,38 +43,28 @@ Repository = "https://github.com/Cam10001110101/mcp-server-browser-use-ollama"
 Issues = "https://github.com/Cam10001110101/mcp-server-browser-use-ollama/issues"
 
 [project.scripts]
-mcp-browser-server = "src.server:main"
-mcp-browser-client = "src.client:main"
-mcp-browser-enhanced = "src.enhanced_client:main"
+mcp-browser-server = "src.server:cli"
+mcp-browser-client = "src.client:cli"
+mcp-browser-enhanced = "src.client:cli"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "pytest-timeout>=2.0.0",
-    "pytest-mock>=3.0.0",
-    "black>=23.0.0",
-    "isort>=5.0.0",
-    "ruff>=0.1.0",
+    "pytest>=9.2.0,<10",
+    "pytest-asyncio>=1.4.1.post1,<2",
+    "pytest-cov>=7.1.0,<8",
+    "pytest-timeout>=2.4.0,<3",
+    "pytest-mock>=3.17.0,<4",
+    "black>=26.10.1,<27",
+    "isort>=9.0.2,<10",
+    "ruff>=0.17.4,<0.18",
+    "pip-audit>=2.10.1,<3",
+    "hatchling==1.33.0",
 ]
 
 [tool.black]
 line-length = 88
-target-version = ["py38"]
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
 line_length = 88
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-
-[tool.uv]
-dev-dependencies = [
-    "pytest>=7.0.0",
-    "black>=23.0.0",
-    "isort>=5.0.0",
-    "ruff>=0.1.0",
-]

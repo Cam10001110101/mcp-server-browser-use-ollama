@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 MCP Server for Browser Automation
-Pure MCP SDK implementation following 2025-06-18 specification
+Official MCP SDK implementation targeting the 2026-07-28 specification.
 """
 
 import sys
 import json
 import logging
-import tempfile
 import asyncio
-from pathlib import Path
 from typing import Dict, Any, Optional, List
+from urllib.parse import urlsplit
 
-from mcp.server import Server
+import anyio
+
+from mcp.server import CacheHint, Server
 from mcp.server.stdio import stdio_server
 from mcp.server.lowlevel.server import InitializationOptions
 from mcp import types
@@ -41,21 +42,32 @@ class BrowserSession:
         
     async def cleanup(self):
         """Clean up browser resources"""
-        try:
-            await self.page.close()
-            await self.context.close()
-            await self.browser.close()
-            await self.playwright.stop()
-        except Exception as e:
-            logger.warning(f"Error during session cleanup: {e}")
+        await cleanup_browser_resources(
+            self.page, self.context, self.browser, self.playwright
+        )
+
+
+async def cleanup_browser_resources(page, context, browser, playwright):
+    """Attempt every close, including after partial startup or cancellation."""
+    # MCP cancels requests using AnyIO cancel scopes. Cleanup must survive those.
+    with anyio.CancelScope(shield=True):
+        for resource, method in (
+            (page, "close"), (context, "close"),
+            (browser, "close"), (playwright, "stop"),
+        ):
+            if resource is None:
+                continue
+            try:
+                with anyio.fail_after(5):
+                    await getattr(resource, method)()
+            except Exception:
+                logger.warning("Browser resource cleanup failed: %s", method)
 
 # Global state for browser sessions
 active_sessions: Dict[str, BrowserSession] = {}
 session_counter = 0
 max_sessions = 10  # Security: limit concurrent sessions
-
-# Create MCP server
-server = Server("browser-automation")
+pending_launches = 0
 
 async def highlight_element(page: Page, x: int, y: int, number: int, color: str = 'red'):
     """Add visual highlight at coordinates"""
@@ -95,14 +107,13 @@ def validate_session(session_id: str) -> BrowserSession:
     
     return session
 
-@server.list_tools()
-async def list_tools() -> List[types.Tool]:
+def tool_definitions() -> List[types.Tool]:
     """List available browser automation tools"""
     return [
         types.Tool(
             name="launch_browser",
             description="Launch a new browser session and navigate to URL",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "url": {
@@ -116,7 +127,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="click_element",
             description="Click at specific coordinates in the browser",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -138,7 +149,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="click_selector",
             description="Click an element by CSS selector",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -156,7 +167,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="type_text",
             description="Type text into the currently focused element",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -174,7 +185,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="scroll_page",
             description="Scroll the page up or down",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -194,7 +205,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="get_page_content",
             description="Get text content of the current page",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -208,7 +219,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="get_dom_structure",
             description="Get simplified DOM structure of the page",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -229,7 +240,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="take_screenshot",
             description="Take a screenshot of the current page",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -243,7 +254,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="extract_data",
             description="Extract structured data from the page",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -261,7 +272,7 @@ async def list_tools() -> List[types.Tool]:
         types.Tool(
             name="close_browser",
             description="Close a browser session",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "session_id": {
@@ -274,7 +285,10 @@ async def list_tools() -> List[types.Tool]:
         )
     ]
 
-@server.call_tool()
+async def list_tools() -> List[types.Tool]:
+    return tool_definitions()
+
+
 async def call_tool(name: str, arguments: dict) -> List[types.TextContent]:
     """Handle tool calls with proper MCP compliance"""
     global session_counter
@@ -331,27 +345,45 @@ async def call_tool(name: str, arguments: dict) -> List[types.TextContent]:
 # Tool implementations
 async def launch_browser_impl(url: str) -> str:
     """Launch browser session with security controls"""
-    global session_counter
+    global session_counter, pending_launches
     
     if not url:
         raise ValueError("URL is required")
     
     # Security: limit concurrent sessions
-    if len(active_sessions) >= max_sessions:
+    if len(active_sessions) + pending_launches >= max_sessions:
         raise RuntimeError(f"Maximum sessions ({max_sessions}) exceeded")
     
     # Security: validate URL format
-    if not url.startswith(('http://', 'https://')):
+    if not isinstance(url, str) or not url.startswith(('http://', 'https://')):
         raise ValueError("Only HTTP/HTTPS URLs are allowed")
+    parsed_url = urlsplit(url)
+    if not parsed_url.hostname:
+        raise ValueError("URL must include a hostname")
     
     session_id = str(session_counter)
     session_counter += 1
+    # Reserve a slot before the first await so in-flight launches count too.
+    pending_launches += 1
+    playwright = browser = context = page = None
+    registered = False
     
     try:
-        playwright = await async_playwright().start()
+        # Playwright cannot stop a driver until start() has returned its handle.
+        # Defer request cancellation across acquisition, then honor it before
+        # launching a browser. Raw asyncio cancellation must also keep ownership.
+        with anyio.CancelScope(shield=True):
+            startup = asyncio.create_task(async_playwright().start())
+            try:
+                playwright = await asyncio.shield(startup)
+            except asyncio.CancelledError:
+                playwright = await startup
+                raise
+        await anyio.lowlevel.checkpoint()
         browser = await playwright.chromium.launch(
             headless=False,
-            args=['--no-sandbox', '--disable-dev-shm-usage', '--start-maximized']  # Security hardening + maximized
+            chromium_sandbox=True,
+            args=['--disable-dev-shm-usage', '--start-maximized']
         )
         context = await browser.new_context(
             no_viewport=True  # Use full browser window instead of fixed viewport
@@ -366,13 +398,20 @@ async def launch_browser_impl(url: str) -> str:
         
         session = BrowserSession(session_id, playwright, browser, context, page)
         active_sessions[session_id] = session
+        registered = True
         
-        logger.info(f"Browser session {session_id} launched for URL: {url}")
+        logger.info("Browser session %s launched", session_id)
         return session_id
         
     except Exception as e:
         logger.error(f"Failed to launch browser: {e}")
         raise RuntimeError(f"Browser launch failed: {str(e)}")
+    finally:
+        try:
+            if not registered:
+                await cleanup_browser_resources(page, context, browser, playwright)
+        finally:
+            pending_launches -= 1
 
 async def click_element_impl(session_id: str, x: int, y: int) -> str:
     """Click at coordinates with validation"""
@@ -551,18 +590,12 @@ async def take_screenshot_impl(session_id: str) -> str:
     session = validate_session(session_id)
     
     try:
-        # Security: use temp file with proper cleanup
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-            screenshot_path = temp_file.name
-        
-        await session.page.screenshot(path=screenshot_path)
-        
-        # Read file and clean up immediately for security
-        file_size = Path(screenshot_path).stat().st_size
-        Path(screenshot_path).unlink()  # Delete immediately after creation
+        # Keep potentially sensitive page contents off disk, even on failure.
+        screenshot = await session.page.screenshot()
+        file_size = len(screenshot)
         
         logger.info(f"Screenshot taken for session {session_id} ({file_size} bytes)")
-        return f"Screenshot captured ({file_size} bytes). File processed and cleaned up for security."
+        return f"Screenshot captured ({file_size} bytes). Processed in memory."
         
     except Exception as e:
         logger.error(f"Screenshot failed: {e}")
@@ -572,7 +605,7 @@ async def extract_data_impl(session_id: str, pattern: str) -> str:
     """Extract data with pattern matching"""
     session = validate_session(session_id)
     
-    if not pattern:
+    if not isinstance(pattern, str) or not pattern:
         raise ValueError("Extraction pattern is required")
     
     try:
@@ -625,42 +658,42 @@ async def extract_data_impl(session_id: str, pattern: str) -> str:
             extraction_js = strategies[pattern_lower]
         else:
             # Generic extraction with security limits
-            extraction_js = f'''
-                () => {{
+            extraction_js = '''
+                pattern => {
                     const elements = [];
                     const allElements = document.querySelectorAll('*');
-                    const patternLower = "{pattern}".toLowerCase();
+                    const patternLower = pattern.toLowerCase();
                     
-                    for (const el of allElements) {{
+                    for (const el of allElements) {
                         const text = el.innerText?.trim();
                         const id = el.id?.toLowerCase();
-                        const className = el.className?.toLowerCase();
+                        const className = el.getAttribute('class')?.toLowerCase();
                         const tagName = el.tagName?.toLowerCase();
                         
                         if ((text && text.toLowerCase().includes(patternLower)) ||
                             (id && id.includes(patternLower)) ||
                             (className && className.includes(patternLower)) ||
-                            (tagName && patternLower.includes(tagName))) {{
+                            (tagName && patternLower.includes(tagName))) {
                             
-                            elements.push({{
+                            elements.push({
                                 tag: tagName,
                                 text: text ? (text.length > 100 ? text.substring(0, 100) + "..." : text) : "",
                                 id: id || undefined,
                                 class: className || undefined
-                            }});
+                            });
                             
                             if (elements.length >= 20) break;
-                        }}
-                    }}
+                        }
+                    }
                     
                     return elements;
-                }}
+                }
             '''
         
-        extracted_data = await session.page.evaluate(extraction_js)
+        extracted_data = await session.page.evaluate(extraction_js, pattern)
         result = json.dumps(extracted_data, indent=2)
         
-        logger.info(f"Extracted data for pattern '{pattern}' from session {session_id}")
+        logger.info("Extracted data from session %s", session_id)
         return result
         
     except Exception as e:
@@ -691,28 +724,54 @@ async def cleanup_all_sessions():
         except Exception as e:
             logger.error(f"Failed to cleanup session {session_id}: {e}")
 
-async def main():
-    """Run the MCP server"""
-    # Setup cleanup on exit
-    import signal
-    
-    def cleanup_handler(signum, frame):
-        logger.info("Received shutdown signal, cleaning up...")
-        asyncio.create_task(cleanup_all_sessions())
-    
-    signal.signal(signal.SIGINT, cleanup_handler)
-    signal.signal(signal.SIGTERM, cleanup_handler)
-    
-    # Run MCP server with stdio transport
-    async with stdio_server() as (read_stream, write_stream):
-        initialization_options = InitializationOptions(
-            server_name="browser-automation",
-            server_version="0.1.0",
-            capabilities=types.ServerCapabilities(
-                tools=types.ToolsCapability(),
-            )
+async def _list_tools_handler(context, params):
+    return types.ListToolsResult(tools=await list_tools())
+
+
+async def _call_tool_handler(context, params):
+    try:
+        content = await call_tool(params.name, params.arguments or {})
+        return types.CallToolResult(content=content)
+    except RuntimeError as exc:
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=str(exc))], is_error=True
         )
-        await server.run(read_stream, write_stream, initialization_options)
+
+
+# MCP 2 registers handlers in the constructor and validates tool inputs here.
+_TOOL_SCHEMAS = {tool.name: tool.input_schema for tool in tool_definitions()}
+server = Server(
+    "browser-automation",
+    version="0.1.0",
+    on_list_tools=_list_tools_handler,
+    on_call_tool=_call_tool_handler,
+    get_tool_input_schema=_TOOL_SCHEMAS.get,
+    cache_hints={"tools/list": CacheHint(ttl_ms=0, scope="private")},
+)
+
+
+async def main():
+    """Run the MCP server, closing browsers on EOF, cancellation or termination."""
+    import signal
+
+    task = asyncio.current_task()
+    previous_sigterm = signal.signal(signal.SIGTERM, lambda *_: task.cancel())
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            initialization_options = InitializationOptions(
+                server_name="browser-automation",
+                server_version="0.1.0",
+                capabilities=types.ServerCapabilities(tools=types.ToolsCapability()),
+            )
+            await server.run(read_stream, write_stream, initialization_options)
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        await cleanup_all_sessions()
+
+
+def cli():
+    asyncio.run(main())
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli()
