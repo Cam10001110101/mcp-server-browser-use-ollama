@@ -38,6 +38,16 @@ jobs:
       - name: Install Chromium
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         run: uv run --locked playwright install --with-deps chromium
+      - name: Permit the installed Chromium to create its sandbox
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          browser_path="$(uv run --locked python -c 'from playwright.sync_api import sync_playwright; p = sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          echo "PLAYWRIGHT_CHROMIUM_EXECUTABLE=$browser_path" >> "$GITHUB_ENV"
+          # Ubuntu restricts user namespaces through AppArmor. Permit only this
+          # executable; keep system restrictions and Chromium sandboxing enabled.
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile playwright-chromium "%s" flags=(unconfined) {\n  userns,\n}\n' "$browser_path" | sudo tee /etc/apparmor.d/playwright-chromium > /dev/null
+          sudo apparmor_parser -r /etc/apparmor.d/playwright-chromium
       - name: Run sandboxed browser security test
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         env:

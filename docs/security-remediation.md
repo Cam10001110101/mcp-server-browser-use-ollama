@@ -112,8 +112,11 @@ in depth, not a claim that the previous action allowed a demonstrated secret lea
   tool listing, schema rejection, tool errors and shutdown.
 - Browser: one E2E test passed with system Chromium 151.0.7922.173, sandbox enabled,
   a disposable local HTTP page and no external websites. CI uses the browser
-  bundled with the locked Playwright release; that exact downloaded binary and
-  other operating systems were not executed in this local run.
+  bundled with the locked Playwright release. Ubuntu's AppArmor restrictions
+  require a user-namespace permission scoped to that executable; CI installs that
+  profile while retaining Chromium sandboxing and system-wide restrictions.
+  GitHub's first run passed the Python tests on Linux, macOS and Windows; its
+  browser test exposed the missing AppArmor profile, which is addressed here.
 - `uv pip check`, critical Ruff checks, source/wheel build, console entry-point
   smoke checks, GitHub Actions validation with actionlint, and `git diff --check`
   passed.
@@ -135,7 +138,7 @@ in depth, not a claim that the previous action allowed a demonstrated secret lea
   cover future disclosures, OS packages, browser internals, Ollama itself, or
   third-party Actions' transitive runtime downloads. Keep the host, browser and
   Ollama patched. GitHub alert inventories could not be queried with the available
-  connector endpoints; no alerts were dismissed.
+  connector endpoints, and CLI reads returned `Forbidden`; no alerts were dismissed.
 - Arbitrary webpages and model output remain untrusted. The automated client can
   take actions based on page contents; prompt injection is not solved by this
   patch. Use a dedicated unprivileged environment without sensitive sessions,
