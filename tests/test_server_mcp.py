@@ -259,14 +259,14 @@ class TestMCPCompliance:
         tool = tools[0]
         assert hasattr(tool, 'name')
         assert hasattr(tool, 'description')
-        assert hasattr(tool, 'inputSchema')
+        assert hasattr(tool, 'input_schema')
         
         # Test that it's launch_browser
         assert tool.name == "launch_browser"
         assert "URL" in tool.description
         
         # Test input schema structure
-        schema = tool.inputSchema
+        schema = tool.input_schema
         assert schema["type"] == "object"
         assert "properties" in schema
         assert "required" in schema

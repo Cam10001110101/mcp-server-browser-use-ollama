@@ -17,7 +17,7 @@ A powerful browser automation system that enables AI agents to control web brows
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.11+
 - [Ollama](https://ollama.ai) installed and running
 - [uv](https://github.com/astral-sh/uv) package manager (recommended)
 
@@ -29,8 +29,8 @@ git clone https://github.com/Cam10001110101/mcp-server-browser-use-ollama
 cd mcp-server-browser-use-ollama
 
 # Install with uv (recommended)
-uv pip install -e .
-playwright install
+uv sync --locked
+uv run --locked playwright install chromium
 
 # Start Ollama and pull a model
 ollama serve  # In one terminal
@@ -57,16 +57,16 @@ Configure in `claude_desktop_config.json`:
 #### Option 2: Ollama-Driven Automation
 ```bash
 # Interactive automation with conversation history
-python src/client.py src/server.py
+uv run --locked python src/client.py src/server.py
 
 # Custom task via command line
-python src/client.py src/server.py "Navigate to Google and search for 'Ollama models'"
+uv run --locked python src/client.py src/server.py "Navigate to Google and search for 'Ollama models'"
 
 # Complex task from file
-python src/client.py src/server.py task_description.txt --file
+uv run --locked python src/client.py src/server.py task_description.txt --file
 
 # With custom model
-python src/client.py src/server.py "Your task" --model llama3.2:latest
+uv run --locked python src/client.py src/server.py "Your task" --model llama3.2:latest
 ```
 
 ## Available Tools
@@ -88,17 +88,17 @@ The MCP server provides 10 browser automation tools:
 
 ### Basic Web Search
 ```bash
-python src/client.py src/server.py "Search for 'Ollama models' on Google and summarize the top 3 results"
+uv run --locked python src/client.py src/server.py "Search for 'Ollama models' on Google and summarize the top 3 results"
 ```
 
 ### E-commerce Analysis
 ```bash
-python src/client.py src/server.py "Compare wireless headphones on Amazon - create a table with prices, ratings, and features"
+uv run --locked python src/client.py src/server.py "Compare wireless headphones on Amazon - create a table with prices, ratings, and features"
 ```
 
 ### Research Workflow
 ```bash
-python src/client.py src/server.py "Research transformer architecture improvements in 2024, visit 5 sources, and compile a summary"
+uv run --locked python src/client.py src/server.py "Research transformer architecture improvements in 2024, visit 5 sources, and compile a summary"
 ```
 
 ### File-based Complex Tasks
@@ -107,7 +107,7 @@ python src/client.py src/server.py "Research transformer architecture improvemen
 echo "Navigate to GitHub, search for MCP repositories, and analyze the top 5 results" > my_task.txt
 
 # Run the task
-python src/client.py src/server.py my_task.txt --file
+uv run --locked python src/client.py src/server.py my_task.txt --file
 ```
 
 ## Environment Variables
@@ -115,18 +115,33 @@ python src/client.py src/server.py my_task.txt --file
 - `OLLAMA_MODEL`: Specify Ollama model (default: `qwen3`)
 - `OLLAMA_HOST`: Ollama API endpoint (default: `http://localhost:11434`)
 
+## Security
+
+Use this server only through a trusted local MCP client. It controls a browser with
+the network access of your user account, including localhost and private networks.
+Run it as an unprivileged user on a host that supports the Chromium sandbox;
+launch fails rather than falling back to an unsandboxed browser.
+
+Webpage text and model responses are untrusted. Use a dedicated browser environment
+without sensitive accounts, restrict network access externally when processing
+untrusted tasks, and supervise actions that submit data or change remote state.
+The server does not provide a network isolation or prompt-injection boundary.
+
+See [security remediation and verification](docs/security-remediation.md) for the
+review scope, fixes, dependency audit commands and remaining limitations.
+
 ## Testing
 
 ```bash
-# Run pure MCP tests (recommended)
-pytest tests/test_server_mcp.py -v
+# Install locked development tools
+uv sync --locked --extra dev
 
-# Run all tests
-pytest
+# Run unit tests and real MCP stdio protocol checks
+uv run --locked pytest -m "not e2e"
 
-# Run specific test categories
-pytest tests/test_server_mcp.py    # Pure MCP implementation tests
-pytest tests/test_integration.py   # Integration tests
+# Run browser security regression tests (POSIX shell)
+uv run --locked playwright install chromium
+RUN_BROWSER_TESTS=1 uv run --locked pytest -m e2e
 ```
 
 ## Project Structure

@@ -14,13 +14,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 class TestIntegration:
     """Test the integration and implementation behavior."""
     
-    def test_server_active_browsers(self):
-        """Test that server uses active_browsers dict."""
+    def test_server_active_sessions(self):
+        """Test that server uses active_sessions dict."""
         import server
         
-        # The server uses active_browsers, not sessions
-        assert hasattr(server, 'active_browsers')
-        assert isinstance(server.active_browsers, dict)
+        # The server uses active_sessions, not sessions
+        assert hasattr(server, 'active_sessions')
+        assert isinstance(server.active_sessions, dict)
     
     def test_client_actual_attributes(self):
         """Test actual client attributes."""
@@ -51,17 +51,17 @@ class TestIntegration:
         
         # Test click_element requires x and y
         with pytest.raises(TypeError) as exc_info:
-            await server.click_element(session_id="test")
+            await server.click_element_impl(session_id="test")
         assert "missing 2 required positional arguments" in str(exc_info.value)
         
         # Test with all parameters - will fail with session error
         with pytest.raises(ValueError) as exc_info:
-            await server.click_element(session_id="test", x=100, y=100)
+            await server.click_element_impl(session_id="test", x=100, y=100)
         assert "No browser session found" in str(exc_info.value)
     
     @pytest.mark.asyncio
     async def test_launch_browser_returns_string(self):
-        """Test launch_browser returns a string (FastMCP behavior)."""
+        """Test launch_browser returns a string (MCP behavior)."""
         import server
         
         # Mock playwright to avoid real browser launch
@@ -70,20 +70,19 @@ class TestIntegration:
         mock_browser = AsyncMock()
         mock_page = AsyncMock()
         mock_page.goto = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
+        mock_context = AsyncMock()
+        mock_context.new_page = AsyncMock(return_value=mock_page)
+        mock_browser.new_context = AsyncMock(return_value=mock_context)
         
         mock_playwright = AsyncMock()
         mock_playwright.chromium.launch = AsyncMock(return_value=mock_browser)
         
         with patch('server.async_playwright') as mock_async_playwright:
-            mock_context = AsyncMock()
-            mock_context.__aenter__.return_value = mock_playwright
-            mock_context.__aexit__.return_value = None
-            mock_async_playwright.return_value = mock_context
+            mock_async_playwright.return_value.start = AsyncMock(return_value=mock_playwright)
             
-            result = await server.launch_browser(url="https://example.com")
+            result = await server.launch_browser_impl(url="https://example.com")
             
-            # FastMCP returns strings, not dicts
+            # The MCP implementation returns strings, not dicts
             assert isinstance(result, str)
             # Should return session ID (a number as string)
             assert result.isdigit()
@@ -104,18 +103,19 @@ class TestIntegration:
             if original:
                 os.environ['OLLAMA_MODEL'] = original
     
-    def test_tools_have_correct_structure(self):
+    @pytest.mark.asyncio
+    async def test_tools_have_correct_structure(self):
         """Test tool structure matches MCP requirements."""
         import server
         
-        for tool in server.tools:
+        for tool in await server.list_tools():
             # Required fields
-            assert 'name' in tool
-            assert 'description' in tool
-            assert 'input_schema' in tool
+            assert tool.name
+            assert tool.description
+            assert tool.input_schema
             
             # Input schema structure
-            schema = tool['input_schema']
+            schema = tool.input_schema
             assert 'type' in schema
             assert schema['type'] == 'object'
             assert 'properties' in schema
@@ -127,29 +127,29 @@ class TestIntegration:
         
         # Operations that should return error dicts
         try:
-            result = await server.get_page_content(session_id="invalid")
+            result = await server.get_page_content_impl(session_id="invalid")
         except ValueError:
             # The actual implementation raises ValueError
             pass
         
         try:
-            result = await server.take_screenshot(session_id="invalid")
+            result = await server.take_screenshot_impl(session_id="invalid")
         except ValueError:
             # The actual implementation raises ValueError
             pass
     
-    def test_fastmcp_tools_exist(self):
-        """Test that FastMCP tools are properly defined."""
+    @pytest.mark.asyncio
+    async def test_mcp_tools_exist(self):
+        """Test that MCP tools are properly defined."""
         import server
         
         # Check that tools list exists and has entries
-        assert hasattr(server, 'tools')
-        assert len(server.tools) > 0
+        assert len(await server.list_tools()) == 10
         
         # Check for key tool functions
-        assert hasattr(server, 'launch_browser')
-        assert hasattr(server, 'click_element')
-        assert hasattr(server, 'close_browser')
+        assert hasattr(server, 'launch_browser_impl')
+        assert hasattr(server, 'click_element_impl')
+        assert hasattr(server, 'close_browser_impl')
     
     def test_client_main_exists(self):
         """Test that main function exists."""
