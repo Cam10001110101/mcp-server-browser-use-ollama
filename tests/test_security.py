@@ -197,15 +197,16 @@ async def test_stdio_shutdown_closes_sessions(monkeypatch, browser_resources):
 
 
 @pytest.mark.integration
-async def test_actual_mcp_stdio_protocol():
-    """Exercise initialization, registration, errors and SDK schema validation."""
+@pytest.mark.parametrize("entry", ["initialize", "discover"])
+async def test_actual_mcp_stdio_protocol(entry):
+    """Exercise native July discovery and legacy client compatibility."""
     params = StdioServerParameters(
         command=sys.executable,
         args=[str(Path(__file__).parents[1] / "src" / "server.py")],
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            await getattr(session, entry)()
             tools = await session.list_tools()
             assert len(tools.tools) == 10
             result = await session.call_tool("launch_browser", {"url": "file:///etc/passwd"})

@@ -4,7 +4,7 @@ A powerful browser automation system that enables AI agents to control web brows
 
 ## Features
 
-- **MCP Integration**: Full support for Model Context Protocol for structured AI-browser communication
+- **MCP Integration**: Targets MCP 2026-07-28 with native discovery and per-request metadata; see [protocol coverage](docs/mcp-2026-07-28.md).
 - **Ollama Model Support**: Optimized for local AI models running through Ollama 
 - **Browser Control**: Complete browser automation with Playwright (Chrome, Firefox, Safari)
 - **AI-Driven Automation**: Natural language browser control via local LLMs

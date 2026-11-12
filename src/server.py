@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MCP Server for Browser Automation
-Pure MCP SDK implementation following 2025-06-18 specification
+Official MCP SDK implementation targeting the 2026-07-28 specification.
 """
 
 import sys
@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 import anyio
 
-from mcp.server import Server
+from mcp.server import CacheHint, Server
 from mcp.server.stdio import stdio_server
 from mcp.server.lowlevel.server import InitializationOptions
 from mcp import types
@@ -746,6 +746,7 @@ server = Server(
     on_list_tools=_list_tools_handler,
     on_call_tool=_call_tool_handler,
     get_tool_input_schema=_TOOL_SCHEMAS.get,
+    cache_hints={"tools/list": CacheHint(ttl_ms=0, scope="private")},
 )
 
 

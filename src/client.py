@@ -72,8 +72,8 @@ class MCPClient:
         logger.debug("Creating client session")
         self.session = await self.exit_stack.enter_async_context(ClientSession(self.stdio, self.write))
         
-        logger.debug("Initializing session")
-        await self.session.initialize()
+        logger.debug("Discovering server (MCP 2026-07-28)")
+        await self.session.discover()
         
         # List available tools
         logger.debug("Listing tools")
